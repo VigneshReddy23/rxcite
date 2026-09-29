@@ -66,3 +66,52 @@ def ask(question: Annotated[str, typer.Argument(help="Your question.")]) -> None
     typer.echo(
         f"(retrieval {result.retrieval_ms:.0f} ms, generation {result.generation_ms:.0f} ms)"
     )
+
+
+QUESTIONS = Path("eval/questions.jsonl")
+
+
+@app.command("make-questions")
+def make_questions_cmd(
+    n: Annotated[int, typer.Option(help="How many questions.")] = 150,
+    seed: Annotated[int, typer.Option(help="Random seed (recorded).")] = 42,
+    out: Annotated[Path, typer.Option(help="Where to save them.")] = QUESTIONS,
+) -> None:
+    """Generate the retrieval test set: one LLM-written question per sampled passage."""
+    from judgekit.providers import make_provider
+
+    from rxcite.config import load_settings
+    from rxcite.evaluate import make_questions, save_questions
+
+    chunks = [c for label in ingest.load_labels(RAW) for c in ingest.chunk_label(label)]
+    provider = make_provider(load_settings().llm)
+    questions = make_questions(chunks, provider, n, seed)
+    save_questions(questions, out)
+    typer.echo(f"Saved {len(questions)} questions to {out} (seed {seed})")
+
+
+@app.command("eval-retrieval")
+def eval_retrieval_cmd(
+    questions: Annotated[Path, typer.Option(help="Question set.")] = QUESTIONS,
+    out: Annotated[Path, typer.Option(help="Where to save results.")] = Path(
+        "results/retrieval.json"
+    ),
+) -> None:
+    """Score every retrieval mode on the question set (recall@k, MRR)."""
+    from rxcite import db
+    from rxcite.config import load_settings
+    from rxcite.embeddings import CrossEncoderReranker, FastEmbedder
+    from rxcite.evaluate import evaluate_retrieval, format_table, load_questions, save_results
+    from rxcite.retrieval import MODES, PostgresIndex, Retriever
+
+    qs = load_questions(questions)
+    conn = db.connect(load_settings().database_url)
+    embedder, reranker = FastEmbedder(), CrossEncoderReranker()
+    results = []
+    for mode in MODES:
+        retriever = Retriever(PostgresIndex(conn), embedder, reranker, mode)
+        results.append(evaluate_retrieval(retriever, qs))
+        typer.echo(f"  scored {mode}")
+    save_results(results, out)
+    typer.echo(f"\nSection-level relevance (n={len(qs)}):\n{format_table(results)}")
+    typer.echo(f"\nExact-chunk relevance:\n{format_table(results, 'exact_chunk')}")

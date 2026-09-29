@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from judgekit.providers import DEFAULT_JUDGE_MODEL_ID, ModelConfig
 
+from rxcite.embeddings import RERANK_MODEL
 from rxcite.retrieval import MODES, Mode
 
 
@@ -19,6 +20,7 @@ class Settings:
     mode: Mode
     top_k: int
     refuse_below: float | None
+    rerank_model: str
     llm: ModelConfig
 
 
@@ -28,7 +30,7 @@ def _optional_float(value: str | None) -> float | None:
 
 def load_settings() -> Settings:
     env = os.environ
-    mode = env.get("RXCITE_MODE", "hybrid_rerank")
+    mode = env.get("RXCITE_MODE", "vector")  # best measured mode (see README, Stage 3)
     if mode not in MODES:
         raise ValueError(f"RXCITE_MODE must be one of {MODES}, got {mode!r}")
     return Settings(
@@ -38,6 +40,7 @@ def load_settings() -> Settings:
         mode=mode,
         top_k=int(env.get("RXCITE_TOP_K", "5")),
         refuse_below=_optional_float(env.get("RXCITE_REFUSE_BELOW")),
+        rerank_model=env.get("RXCITE_RERANK_MODEL", RERANK_MODEL),
         llm=ModelConfig(
             provider=env.get("RXCITE_PROVIDER", "bedrock"),
             model=env.get("RXCITE_MODEL", DEFAULT_JUDGE_MODEL_ID),

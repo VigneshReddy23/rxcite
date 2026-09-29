@@ -31,9 +31,16 @@ def one_hot(i: int) -> list[float]:
 
 @pytest.fixture
 def conn() -> Iterator[psycopg.Connection[tuple[object, ...]]]:
+    """A connection whose tables live in a throwaway `rxcite_test` schema.
+
+    search_path makes unqualified names ("chunks") resolve there first, so these
+    tests can never drop or modify real data in the default schema.
+    """
     assert URL
     c = db.connect(URL)
-    c.execute("DROP TABLE IF EXISTS chunks")
+    c.execute("DROP SCHEMA IF EXISTS rxcite_test CASCADE")
+    c.execute("CREATE SCHEMA rxcite_test")
+    c.execute("SET search_path TO rxcite_test, public")
     db.init_schema(c)
     db.upsert_chunks(
         c,
@@ -45,7 +52,7 @@ def conn() -> Iterator[psycopg.Connection[tuple[object, ...]]]:
         [one_hot(0), one_hot(1), one_hot(2)],
     )
     yield c
-    c.execute("DROP TABLE IF EXISTS chunks")
+    c.execute("DROP SCHEMA IF EXISTS rxcite_test CASCADE")
     c.close()
 
 
@@ -64,6 +71,18 @@ def test_keyword_search_matches_any_word(conn: psycopg.Connection[tuple[object, 
 
 def test_keyword_search_stopwords_only(conn: psycopg.Connection[tuple[object, ...]]) -> None:
     assert db.keyword_search(conn, "the and of", k=5) == []
+
+
+def test_tests_do_not_touch_the_default_schema(
+    conn: psycopg.Connection[tuple[object, ...]],
+) -> None:
+    def public_table_oid() -> object:
+        row = conn.execute("SELECT to_regclass('public.chunks')::oid").fetchone()
+        return row[0] if row else None
+
+    before = public_table_oid()
+    conn.execute("DROP TABLE IF EXISTS chunks")  # resolves to rxcite_test.chunks
+    assert public_table_oid() == before
 
 
 def test_upsert_is_idempotent(conn: psycopg.Connection[tuple[object, ...]]) -> None:

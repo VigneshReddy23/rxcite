@@ -48,6 +48,15 @@ def test_rerank_reorders_candidates() -> None:
     assert result[0].score == 2.0  # scores are now reranker scores
 
 
+def test_vector_rerank_skips_keyword_search() -> None:
+    index = FakeIndex(hits(B, A), hits(C))
+    result = Retriever(index, FakeEmbedder(), KeywordReranker(), "vector_rerank").search(
+        "stomach bleeding", k=2
+    )
+    assert [h.chunk.id for h in result] == ["a", "b"]
+    assert index.calls == [("vector", CANDIDATES)]  # keyword search never ran
+
+
 def test_rerank_mode_requires_a_reranker() -> None:
     with pytest.raises(ValueError, match="needs a reranker"):
         Retriever(FakeIndex([], []), FakeEmbedder(), mode="hybrid_rerank")

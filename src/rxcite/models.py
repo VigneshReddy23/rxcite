@@ -12,6 +12,14 @@ class Chunk(BaseModel):
     section: str  # human-readable section, e.g. "Warnings"
     text: str
 
+    def with_context(self) -> str:
+        """Passage text prefixed with its drug and section.
+
+        Many passages never name their drug ("May cause drowsiness"), so without
+        this prefix search can't tell which drug a passage is about.
+        """
+        return f"{self.drug}. {self.section}. {self.text}"
+
 
 class Hit(BaseModel):
     """A chunk returned by search, with the score that ranked it."""

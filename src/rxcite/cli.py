@@ -49,7 +49,7 @@ def index(
     embedder = FastEmbedder()
     for start in range(0, len(chunks), batch):
         part = chunks[start : start + batch]
-        db.upsert_chunks(conn, part, embedder.embed([c.text for c in part]))
+        db.upsert_chunks(conn, part, embedder.embed([c.with_context() for c in part]))
         typer.echo(f"  indexed {min(start + batch, len(chunks))}/{len(chunks)}")
     typer.echo(f"Database now holds {db.count_chunks(conn)} chunks")
 
@@ -96,19 +96,23 @@ def eval_retrieval_cmd(
     out: Annotated[Path, typer.Option(help="Where to save results.")] = Path(
         "results/retrieval.json"
     ),
+    modes: Annotated[str, typer.Option(help="Comma-separated modes, or 'all'.")] = "all",
+    reranker_model: Annotated[str, typer.Option("--reranker", help="Cross-encoder model.")] = "",
 ) -> None:
-    """Score every retrieval mode on the question set (recall@k, MRR)."""
+    """Score retrieval modes on the question set (recall@k, MRR)."""
     from rxcite import db
     from rxcite.config import load_settings
-    from rxcite.embeddings import CrossEncoderReranker, FastEmbedder
+    from rxcite.embeddings import RERANK_MODEL, CrossEncoderReranker, FastEmbedder
     from rxcite.evaluate import evaluate_retrieval, format_table, load_questions, save_results
     from rxcite.retrieval import MODES, PostgresIndex, Retriever
 
+    selected = MODES if modes == "all" else tuple(m for m in MODES if m in modes.split(","))
     qs = load_questions(questions)
     conn = db.connect(load_settings().database_url)
-    embedder, reranker = FastEmbedder(), CrossEncoderReranker()
+    embedder = FastEmbedder()
+    reranker = CrossEncoderReranker(reranker_model or RERANK_MODEL)
     results = []
-    for mode in MODES:
+    for mode in selected:
         retriever = Retriever(PostgresIndex(conn), embedder, reranker, mode)
         results.append(evaluate_retrieval(retriever, qs))
         typer.echo(f"  scored {mode}")

@@ -45,10 +45,12 @@ def build_service() -> RAGService:  # pragma: no cover - wires real DB + models
     from rxcite import db
     from rxcite.config import load_settings
     from rxcite.embeddings import CrossEncoderReranker, FastEmbedder
-    from rxcite.retrieval import PostgresIndex, Retriever
+    from rxcite.retrieval import RERANK_MODES, PostgresIndex, Retriever
 
     settings = load_settings()
-    reranker = CrossEncoderReranker() if settings.mode == "hybrid_rerank" else None
+    reranker = (
+        CrossEncoderReranker(settings.rerank_model) if settings.mode in RERANK_MODES else None
+    )
     retriever = Retriever(
         PostgresIndex(db.connect(settings.database_url)), FastEmbedder(), reranker, settings.mode
     )

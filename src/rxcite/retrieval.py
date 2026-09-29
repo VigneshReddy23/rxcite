@@ -1,10 +1,11 @@
 """Find the passages most likely to answer a question.
 
-Four modes, so evaluation can compare them on the same questions:
+Five modes, so evaluation can compare them on the same questions:
   vector         semantic similarity only (embeddings + pgvector)
   keyword        exact-word matching only (Postgres full-text search)
   hybrid         both lists merged with Reciprocal Rank Fusion
   hybrid_rerank  hybrid, then a cross-encoder re-orders the top candidates
+  vector_rerank  vector only, then the cross-encoder re-orders them
 """
 
 from collections.abc import Sequence
@@ -16,8 +17,9 @@ from rxcite import db
 from rxcite.embeddings import Embedder, Reranker
 from rxcite.models import Hit
 
-Mode = Literal["vector", "keyword", "hybrid", "hybrid_rerank"]
-MODES: tuple[Mode, ...] = ("vector", "keyword", "hybrid", "hybrid_rerank")
+Mode = Literal["vector", "keyword", "hybrid", "hybrid_rerank", "vector_rerank"]
+MODES: tuple[Mode, ...] = ("vector", "keyword", "hybrid", "hybrid_rerank", "vector_rerank")
+RERANK_MODES = ("hybrid_rerank", "vector_rerank")
 
 CANDIDATES = 30  # how many each search returns before fusion / reranking
 RRF_K = 60  # standard constant from the RRF paper (Cormack et al., 2009)
@@ -63,8 +65,8 @@ class Retriever:
         reranker: Reranker | None = None,
         mode: Mode = "hybrid_rerank",
     ) -> None:
-        if mode == "hybrid_rerank" and reranker is None:
-            raise ValueError("hybrid_rerank mode needs a reranker")
+        if mode in RERANK_MODES and reranker is None:
+            raise ValueError(f"{mode} mode needs a reranker")
         self.index = index
         self.embedder = embedder
         self.reranker = reranker
@@ -76,12 +78,15 @@ class Retriever:
         vector_hits = self.index.vector(self.embedder.embed([question])[0], CANDIDATES)
         if self.mode == "vector":
             return vector_hits[:k]
-        fused = reciprocal_rank_fusion(vector_hits, self.index.keyword(question, CANDIDATES))
-        if self.mode == "hybrid":
-            return fused[:k]
+        if self.mode == "vector_rerank":
+            candidates = vector_hits
+        else:
+            fused = reciprocal_rank_fusion(vector_hits, self.index.keyword(question, CANDIDATES))
+            if self.mode == "hybrid":
+                return fused[:k]
+            candidates = fused[:CANDIDATES]
         assert self.reranker is not None
-        candidates = fused[:CANDIDATES]
-        scores = self.reranker.scores(question, [h.chunk.text for h in candidates])
+        scores = self.reranker.scores(question, [h.chunk.with_context() for h in candidates])
         reranked = sorted(
             (Hit(chunk=h.chunk, score=s) for h, s in zip(candidates, scores, strict=True)),
             key=lambda h: h.score,

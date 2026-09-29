@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from typing import Literal, Protocol
 
 import psycopg
+from psycopg_pool import ConnectionPool
 
 from rxcite import db
 from rxcite.embeddings import Embedder, Reranker
@@ -39,6 +40,21 @@ class PostgresIndex:
 
     def keyword(self, query: str, k: int) -> list[Hit]:
         return db.keyword_search(self.conn, query, k)
+
+
+class PooledIndex:
+    """Same queries as PostgresIndex, but each borrows a connection from a pool."""
+
+    def __init__(self, pool: ConnectionPool) -> None:
+        self.pool = pool
+
+    def vector(self, embedding: Sequence[float], k: int) -> list[Hit]:
+        with self.pool.connection() as conn:
+            return db.vector_search(conn, embedding, k)
+
+    def keyword(self, query: str, k: int) -> list[Hit]:
+        with self.pool.connection() as conn:
+            return db.keyword_search(conn, query, k)
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[Hit], k: int = RRF_K) -> list[Hit]:

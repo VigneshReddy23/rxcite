@@ -1,0 +1,5 @@
+Load tests (Locust 2.x, headless, 60 s each), API + Postgres in Docker via Colima.
+Host: Apple M5 MacBook, 16 GB RAM. Docker VM: 2 vCPU, 4 GB RAM (Colima, vz).
+Answering model: Claude Haiku 4.5 on Amazon Bedrock (us.anthropic.claude-haiku-4-5-20251001-v1:0).
+Retrieval: mode=vector, contextual bge-small embeddings, pgvector HNSW, top_k=5, refuse_below=0.74.
+User think time: 0.5-1.5 s between requests.

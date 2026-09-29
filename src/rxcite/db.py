@@ -11,6 +11,7 @@ from typing import cast
 import numpy as np
 import psycopg
 from pgvector.psycopg import register_vector
+from psycopg_pool import ConnectionPool
 
 from rxcite.embeddings import EMBED_DIM
 from rxcite.models import Chunk, Hit
@@ -40,6 +41,21 @@ def connect(url: str) -> psycopg.Connection[tuple[object, ...]]:
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     register_vector(conn)
     return conn
+
+
+def make_pool(url: str, max_size: int = 10) -> ConnectionPool:
+    """A pool of ready connections, so concurrent API requests don't queue on one.
+
+    Each new connection gets the pgvector type registered before use.
+    """
+    return ConnectionPool(
+        url,
+        min_size=1,
+        max_size=max_size,
+        kwargs={"autocommit": True},
+        configure=register_vector,
+        open=True,
+    )
 
 
 def init_schema(conn: psycopg.Connection[tuple[object, ...]]) -> None:

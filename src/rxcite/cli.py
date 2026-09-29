@@ -225,3 +225,28 @@ def report_answers_cmd(
             f" | correct refusals {rates['correct_refusal_rate']:.3f}"
             f" | refused before any LLM call {rates['pre_llm_refusal_rate']:.3f}"
         )
+
+
+@app.command("report-cost")
+def report_cost_cmd(
+    records_path: Annotated[Path, typer.Option("--records", help="From eval-answers.")] = ANSWERS,
+    input_price: Annotated[float, typer.Option(help="USD per 1M input tokens.")] = 1.10,
+    output_price: Annotated[float, typer.Option(help="USD per 1M output tokens.")] = 5.50,
+) -> None:
+    """Latency percentiles and cost per 1,000 queries from recorded answers.
+
+    Default prices: Claude Haiku 4.5 on Bedrock, us-east-1 "Standard" tier
+    (AWS Marketplace rate card, checked 2026-09-28).
+    """
+    from rxcite.answer_eval import load_records
+    from rxcite.bench import cost_per_1k, latency_summary
+
+    records = load_records(records_path)
+    for name, p in latency_summary(records).items():
+        typer.echo(f"{name:<14} p50 {p['p50']:7.0f} ms   p95 {p['p95']:7.0f} ms")
+    c = cost_per_1k(records, input_price, output_price)
+    typer.echo(
+        f"\nPer LLM call: {c['input_tokens']:.0f} input + {c['output_tokens']:.0f} output tokens"
+        f"\nCost: ${c['usd_per_1k']:.2f} per 1,000 answered questions"
+        f" (${input_price}/${output_price} per 1M tokens)"
+    )

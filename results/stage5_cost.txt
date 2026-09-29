@@ -1,0 +1,6 @@
+retrieval_ms   p50      14 ms   p95      19 ms
+generation_ms  p50    1810 ms   p95    3179 ms
+total_ms       p50    1825 ms   p95    3197 ms
+
+Per LLM call: 1505 input + 127 output tokens
+Cost: $2.35 per 1,000 answered questions ($1.1/$5.5 per 1M tokens)

@@ -1,3 +1,5 @@
+import pytest
+
 from rxcite.answer_eval import (
     AnswerRecord,
     choose_threshold,
@@ -113,3 +115,21 @@ def test_run_one_judges_answered_questions() -> None:
         top_k=1,
     )
     assert refused.faithful is None and refused.answer.refused
+
+
+def test_latency_and_cost() -> None:
+    from rxcite.bench import cost_per_1k, latency_summary, percentiles
+
+    p = percentiles([1, 2, 3, 4, 100])
+    assert p["p50"] == 3.0
+    assert p["p95"] == pytest.approx(80.8)  # linear interpolation between 4 and 100
+    a = record("answerable", 0.8)
+    a.answer.input_tokens, a.answer.output_tokens = 1000, 100
+    refused = record("unanswerable", 0.3, refused=True)
+    refused.answer.generation_ms = 0
+    summary = latency_summary([a, refused])
+    assert summary["retrieval_ms"]["p50"] == 1.0
+    assert summary["total_ms"]["p50"] == 2.0  # refused (no LLM) queries excluded
+    c = cost_per_1k([a, refused], input_per_million=1.0, output_per_million=5.0)
+    # (1000 * $1 + 100 * $5) / 1M per query = $0.0015 -> $1.50 per 1k
+    assert c["usd_per_1k"] == 1.5

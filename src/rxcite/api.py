@@ -1,6 +1,7 @@
 """HTTP API (FastAPI).
 
 POST /ask     {"question": "..."}  ->  answer, citations, refused, timings
+POST /search  {"question": "..."}  ->  top passages only (no LLM call, no cost)
 GET  /health  liveness check for Docker / load balancers
 """
 
@@ -9,7 +10,7 @@ from typing import Any
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from rxcite.models import Answer
+from rxcite.models import Answer, Hit
 from rxcite.service import RAGService
 
 
@@ -36,6 +37,11 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     def ask(request: AskRequest) -> Answer:
         return get_service().ask(request.question)
 
+    @app.post("/search")
+    def search(request: AskRequest) -> list[Hit]:
+        svc = get_service()
+        return svc.retriever.search(request.question, svc.top_k)
+
     return app
 
 
@@ -45,14 +51,14 @@ def build_service() -> RAGService:  # pragma: no cover - wires real DB + models
     from rxcite import db
     from rxcite.config import load_settings
     from rxcite.embeddings import CrossEncoderReranker, FastEmbedder
-    from rxcite.retrieval import RERANK_MODES, PostgresIndex, Retriever
+    from rxcite.retrieval import RERANK_MODES, PooledIndex, Retriever
 
     settings = load_settings()
     reranker = (
         CrossEncoderReranker(settings.rerank_model) if settings.mode in RERANK_MODES else None
     )
     retriever = Retriever(
-        PostgresIndex(db.connect(settings.database_url)), FastEmbedder(), reranker, settings.mode
+        PooledIndex(db.make_pool(settings.database_url)), FastEmbedder(), reranker, settings.mode
     )
     return RAGService(retriever, make_provider(settings.llm), settings.top_k, settings.refuse_below)
 

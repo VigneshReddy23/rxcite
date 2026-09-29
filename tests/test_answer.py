@@ -66,5 +66,10 @@ def test_api_health_and_ask() -> None:
     assert body["refused"] is False
 
 
+def test_api_search_returns_passages_without_llm() -> None:
+    body = make_client().post("/search", json={"question": "bleeding?"}).json()
+    assert [h["chunk"]["id"] for h in body] == ["a", "b"]
+
+
 def test_api_validates_input() -> None:
     assert make_client().post("/ask", json={"question": ""}).status_code == 422

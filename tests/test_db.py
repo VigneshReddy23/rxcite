@@ -85,6 +85,19 @@ def test_tests_do_not_touch_the_default_schema(
     assert public_table_oid() == before
 
 
+def test_pooled_index_matches_direct_queries(conn: psycopg.Connection[tuple[object, ...]]) -> None:
+    from rxcite.retrieval import PooledIndex
+
+    assert URL
+    pool = db.make_pool(URL + "?options=-csearch_path%3Drxcite_test,public", max_size=2)
+    try:
+        index = PooledIndex(pool)
+        assert [h.chunk.id for h in index.vector(one_hot(2), 1)] == ["c"]
+        assert {h.chunk.id for h in index.keyword("liver", 5)} == {"c"}
+    finally:
+        pool.close()
+
+
 def test_upsert_is_idempotent(conn: psycopg.Connection[tuple[object, ...]]) -> None:
     db.upsert_chunks(conn, [chunk("a", "updated text")], [one_hot(0)])
     assert db.count_chunks(conn) == 3

@@ -1,0 +1,40 @@
+# Local stack: Postgres + pgvector, and the rxcite API.
+#   docker compose up -d db            # database only (for `rxcite index` from your machine)
+#   docker compose up -d --build       # database + API on http://localhost:8000
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: rxcite
+      POSTGRES_PASSWORD: rxcite   # local development only
+      POSTGRES_DB: rxcite
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rxcite"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      RXCITE_DATABASE_URL: postgresql://rxcite:rxcite@db:5432/rxcite
+      RXCITE_PROVIDER: ${RXCITE_PROVIDER:-bedrock}
+      RXCITE_MODEL: ${RXCITE_MODEL:-us.anthropic.claude-haiku-4-5-20251001-v1:0}
+      RXCITE_REGION: ${RXCITE_REGION:-us-east-1}
+      RXCITE_REFUSE_BELOW: ${RXCITE_REFUSE_BELOW:-}
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - ${HOME}/.aws:/root/.aws   # local AWS login, so the container can call Bedrock
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

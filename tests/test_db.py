@@ -1,0 +1,71 @@
+"""Integration tests against a real Postgres + pgvector.
+
+Run with a database available, e.g.:
+  docker compose up -d db
+  RXCITE_TEST_DATABASE_URL=postgresql://rxcite:rxcite@localhost:5432/rxcite pytest -m db
+CI provides one as a service container. Skipped otherwise.
+"""
+
+import os
+from collections.abc import Iterator
+
+import psycopg
+import pytest
+
+from rxcite import db
+from rxcite.embeddings import EMBED_DIM
+from tests.fakes import chunk
+
+URL = os.environ.get("RXCITE_TEST_DATABASE_URL")
+pytestmark = [
+    pytest.mark.db,
+    pytest.mark.skipif(not URL, reason="RXCITE_TEST_DATABASE_URL not set"),
+]
+
+
+def one_hot(i: int) -> list[float]:
+    v = [0.0] * EMBED_DIM
+    v[i] = 1.0
+    return v
+
+
+@pytest.fixture
+def conn() -> Iterator[psycopg.Connection[tuple[object, ...]]]:
+    assert URL
+    c = db.connect(URL)
+    c.execute("DROP TABLE IF EXISTS chunks")
+    db.init_schema(c)
+    db.upsert_chunks(
+        c,
+        [
+            chunk("a", "Ibuprofen may cause severe stomach bleeding."),
+            chunk("b", "Store at room temperature away from moisture.", drug="Loratadine"),
+            chunk("c", "Acetaminophen overdose can cause liver damage.", drug="Acetaminophen"),
+        ],
+        [one_hot(0), one_hot(1), one_hot(2)],
+    )
+    yield c
+    c.execute("DROP TABLE IF EXISTS chunks")
+    c.close()
+
+
+def test_vector_search_orders_by_cosine(conn: psycopg.Connection[tuple[object, ...]]) -> None:
+    near_b = one_hot(1)
+    near_b[0] = 0.3
+    hits = db.vector_search(conn, near_b, k=2)
+    assert [h.chunk.id for h in hits] == ["b", "a"]
+    assert hits[0].score > hits[1].score
+
+
+def test_keyword_search_matches_any_word(conn: psycopg.Connection[tuple[object, ...]]) -> None:
+    hits = db.keyword_search(conn, "can ibuprofen cause liver problems?", k=5)
+    assert {h.chunk.id for h in hits} == {"a", "c"}  # OR semantics: either word matches
+
+
+def test_keyword_search_stopwords_only(conn: psycopg.Connection[tuple[object, ...]]) -> None:
+    assert db.keyword_search(conn, "the and of", k=5) == []
+
+
+def test_upsert_is_idempotent(conn: psycopg.Connection[tuple[object, ...]]) -> None:
+    db.upsert_chunks(conn, [chunk("a", "updated text")], [one_hot(0)])
+    assert db.count_chunks(conn) == 3

@@ -1,0 +1,51 @@
+# Lint, type-check and test on every push and PR. No secrets, no model calls:
+# unit tests use fakes, and the database tests run against a throwaway
+# Postgres + pgvector service container.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: rxcite
+          POSTGRES_PASSWORD: rxcite
+          POSTGRES_DB: rxcite
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rxcite" --health-interval 3s --health-retries 20
+    env:
+      RXCITE_TEST_DATABASE_URL: postgresql://rxcite:rxcite@localhost:5432/rxcite
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Type-check
+        run: mypy src tests
+      - name: Test (unit + database integration)
+        run: pytest --cov=rxcite --cov-report=term-missing

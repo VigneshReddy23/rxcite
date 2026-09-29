@@ -1,0 +1,6 @@
+Faithfulness (answerable, answered): 57/57 = 1.000
+Answers with at least one citation: 57/57
+
+Threshold chosen on calibration half: top cosine < 0.742 -> refuse
+  test half, LLM refusal only  false refusals 0.033 | correct refusals 0.950 | refused before any LLM call 0.000
+  test half, LLM + threshold   false refusals 0.033 | correct refusals 0.950 | refused before any LLM call 0.700

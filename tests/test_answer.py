@@ -22,6 +22,7 @@ def test_prompt_numbers_sources_and_wraps_data() -> None:
 
 def test_cited_numbers_in_order_and_valid_only() -> None:
     assert cited_numbers("A [2]. B [1][2]. C [7].", n_sources=2) == [2, 1]
+    assert cited_numbers("Grouped [1, 3] and [2,4].", n_sources=4) == [1, 3, 2, 4]
 
 
 def test_answer_with_citations() -> None:

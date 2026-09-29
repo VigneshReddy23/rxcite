@@ -39,7 +39,8 @@ def load_settings() -> Settings:
         ),
         mode=mode,
         top_k=int(env.get("RXCITE_TOP_K", "5")),
-        refuse_below=_optional_float(env.get("RXCITE_REFUSE_BELOW")),
+        # Chosen in Stage 4 on a calibration split; see results/stage4_report.txt.
+        refuse_below=_optional_float(env.get("RXCITE_REFUSE_BELOW", "0.74")),
         rerank_model=env.get("RXCITE_RERANK_MODEL", RERANK_MODEL),
         llm=ModelConfig(
             provider=env.get("RXCITE_PROVIDER", "bedrock"),

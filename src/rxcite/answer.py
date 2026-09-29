@@ -32,7 +32,8 @@ Rules:
 - End with: "This is general label information, not medical advice."
 """
 
-CITATION_RE = re.compile(r"\[(\d+)\]")
+# Matches [1], [2, 5] and [1,3,4]; models often group citations.
+CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 
 def build_prompt(question: str, hits: list[Hit]) -> str:
@@ -46,9 +47,10 @@ def cited_numbers(text: str, n_sources: int) -> list[int]:
     """[n] markers in order of first use, ignoring numbers with no source."""
     seen: list[int] = []
     for match in CITATION_RE.finditer(text):
-        n = int(match.group(1))
-        if 1 <= n <= n_sources and n not in seen:
-            seen.append(n)
+        for part in match.group(1).split(","):
+            n = int(part)
+            if 1 <= n <= n_sources and n not in seen:
+                seen.append(n)
     return seen
 
 

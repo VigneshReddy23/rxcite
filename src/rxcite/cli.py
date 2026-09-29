@@ -119,3 +119,109 @@ def eval_retrieval_cmd(
     save_results(results, out)
     typer.echo(f"\nSection-level relevance (n={len(qs)}):\n{format_table(results)}")
     typer.echo(f"\nExact-chunk relevance:\n{format_table(results, 'exact_chunk')}")
+
+
+UNANSWERABLE = Path("eval/unanswerable.jsonl")
+ANSWERS = Path("results/answers.jsonl")
+
+
+@app.command("make-unanswerable")
+def make_unanswerable_cmd(
+    off_topic: Annotated[int, typer.Option(help="Off-topic questions.")] = 20,
+    unknown_drug: Annotated[int, typer.Option(help="Questions about drugs not indexed.")] = 20,
+    out: Annotated[Path, typer.Option(help="Where to save them.")] = UNANSWERABLE,
+) -> None:
+    """Generate questions the FDA labels in the corpus can't answer."""
+    import json
+
+    from judgekit.providers import make_provider
+
+    from rxcite.answer_eval import make_unanswerable
+    from rxcite.config import load_settings
+
+    drugs = sorted({ingest.drug_name(label) for label in ingest.load_labels(RAW)})
+    # Real drug names well below the indexed top 300 in openFDA's label counts.
+    candidates = [n.title() for n in ingest.top_generic_names(1000)[600:]]
+    pairs = make_unanswerable(
+        make_provider(load_settings().llm), drugs, candidates, off_topic, unknown_drug
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        "".join(
+            json.dumps({"id": f"u{i:03d}", "subtype": kind, "question": q}) + "\n"
+            for i, (kind, q) in enumerate(pairs, start=1)
+        )
+    )
+    typer.echo(f"Saved {len(pairs)} unanswerable questions to {out}")
+
+
+@app.command("eval-answers")
+def eval_answers_cmd(
+    answerable: Annotated[int, typer.Option(help="Answerable questions to sample.")] = 60,
+    seed: Annotated[int, typer.Option(help="Sampling seed.")] = 7,
+    out: Annotated[Path, typer.Option(help="Where to save per-question records.")] = ANSWERS,
+) -> None:
+    """Answer answerable + unanswerable questions and judge faithfulness with judgekit."""
+    import json
+    import random
+
+    from judgekit.judges import LLMJudge
+    from judgekit.providers import make_provider
+
+    from rxcite import db
+    from rxcite.answer_eval import run_one, save_records
+    from rxcite.config import load_settings
+    from rxcite.embeddings import FastEmbedder
+    from rxcite.evaluate import load_questions
+    from rxcite.retrieval import PostgresIndex, Retriever
+
+    settings = load_settings()
+    provider = make_provider(settings.llm)
+    judge = LLMJudge("groundedness", provider)  # judgekit's calibrated rubric
+    retriever = Retriever(
+        PostgresIndex(db.connect(settings.database_url)), FastEmbedder(), mode="vector"
+    )
+
+    qs = random.Random(seed).sample(load_questions(QUESTIONS), answerable)
+    todo = [(q.id, "answerable", q.question) for q in qs]
+    todo += [
+        (row["id"], "unanswerable", row["question"])
+        for row in map(json.loads, UNANSWERABLE.read_text().splitlines())
+    ]
+    records = []
+    for i, (qid, kind, question) in enumerate(todo, start=1):
+        records.append(run_one(qid, kind, question, retriever, provider, judge, settings.top_k))
+        if i % 20 == 0:
+            typer.echo(f"  {i}/{len(todo)}")
+    save_records(records, out)
+    typer.echo(f"Saved {len(records)} records to {out}")
+
+
+@app.command("report-answers")
+def report_answers_cmd(
+    records_path: Annotated[Path, typer.Option("--records", help="From eval-answers.")] = ANSWERS,
+    seed: Annotated[int, typer.Option(help="Calibration/test split seed.")] = 11,
+) -> None:
+    """Faithfulness, and refusal rates with a threshold chosen on a held-out split."""
+    from rxcite.answer_eval import choose_threshold, load_records, refusal_rates, split_halves
+
+    records = load_records(records_path)
+    answered = [r for r in records if r.kind == "answerable" and r.faithful is not None]
+    faithful = sum(bool(r.faithful) for r in answered)
+    typer.echo(
+        f"Faithfulness (answerable, answered): {faithful}/{len(answered)} "
+        f"= {faithful / len(answered):.3f}"
+    )
+    cited = sum(bool(r.answer.citations) for r in answered)
+    typer.echo(f"Answers with at least one citation: {cited}/{len(answered)}")
+
+    cal, test = split_halves(records, seed)
+    threshold = choose_threshold(cal)
+    typer.echo(f"\nThreshold chosen on calibration half: top cosine < {threshold:.3f} -> refuse")
+    for name, t in [("LLM refusal only", None), ("LLM + threshold", threshold)]:
+        rates = refusal_rates(test, t)
+        typer.echo(
+            f"  test half, {name:<17} false refusals {rates['false_refusal_rate']:.3f}"
+            f" | correct refusals {rates['correct_refusal_rate']:.3f}"
+            f" | refused before any LLM call {rates['pre_llm_refusal_rate']:.3f}"
+        )

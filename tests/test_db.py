@@ -98,6 +98,12 @@ def test_pooled_index_matches_direct_queries(conn: psycopg.Connection[tuple[obje
         pool.close()
 
 
+def test_all_chunks_round_trip(conn: psycopg.Connection[tuple[object, ...]]) -> None:
+    rows = db.all_chunks(conn)
+    assert [c.id for c, _ in rows] == ["a", "b", "c"]
+    assert rows[0][1][0] == 1.0 and len(rows[0][1]) == EMBED_DIM
+
+
 def test_upsert_is_idempotent(conn: psycopg.Connection[tuple[object, ...]]) -> None:
     db.upsert_chunks(conn, [chunk("a", "updated text")], [one_hot(0)])
     assert db.count_chunks(conn) == 3

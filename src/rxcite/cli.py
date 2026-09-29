@@ -250,3 +250,59 @@ def report_cost_cmd(
         f"\nCost: ${c['usd_per_1k']:.2f} per 1,000 answered questions"
         f" (${input_price}/${output_price} per 1M tokens)"
     )
+
+
+SEED = Path("data/seed/chunks.jsonl.gz")
+
+
+@app.command("export-chunks")
+def export_chunks_cmd(out: Annotated[Path, typer.Option(help="Output file.")] = SEED) -> None:
+    """Export indexed chunks + embeddings, to load another database without re-embedding."""
+    import gzip
+    import json
+
+    from rxcite import db
+    from rxcite.config import load_settings
+
+    rows = db.all_chunks(db.connect(load_settings().database_url))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(out, "wt", encoding="utf-8") as f:
+        for chunk, embedding in rows:
+            f.write(json.dumps({**chunk.model_dump(), "embedding": embedding}) + "\n")
+    typer.echo(f"Exported {len(rows)} chunks to {out}")
+
+
+@app.command("import-chunks")
+def import_chunks_cmd(
+    src: Annotated[str, typer.Option("--from", help="File or s3://bucket/key.")] = str(SEED),
+    batch: Annotated[int, typer.Option(help="Rows per insert batch.")] = 500,
+) -> None:
+    """Create the schema and load exported chunks (used to seed the cloud database)."""
+    import gzip
+    import json
+    import tempfile
+
+    from rxcite import db
+    from rxcite.config import load_settings
+    from rxcite.models import Chunk
+
+    path = Path(src)
+    if src.startswith("s3://"):  # the cloud seed task reads straight from S3
+        import boto3
+
+        bucket, key = src.removeprefix("s3://").split("/", 1)
+        path = Path(tempfile.gettempdir()) / "chunks.jsonl.gz"
+        boto3.client("s3").download_file(bucket, key, str(path))
+        typer.echo(f"Downloaded {src}")
+    conn = db.connect(load_settings().database_url)
+    db.init_schema(conn)
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    for start in range(0, len(rows), batch):
+        part = rows[start : start + batch]
+        db.upsert_chunks(
+            conn,
+            [Chunk(**{k: r[k] for k in ("id", "set_id", "drug", "section", "text")}) for r in part],
+            [r["embedding"] for r in part],
+        )
+    typer.echo(f"Database now holds {db.count_chunks(conn)} chunks")

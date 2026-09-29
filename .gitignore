@@ -13,3 +13,12 @@ coverage.xml
 data/raw/
 # Local results that may be large
 results/*.jsonl
+!results/answers.jsonl
+# Seed export (regenerate with `rxcite export-chunks`)
+data/seed/
+# Terraform state holds secrets
+infra/.terraform/
+infra/*.tfstate*
+infra/.terraform.lock.hcl.bak
+infra/tfplan
+infra/*.tfplan

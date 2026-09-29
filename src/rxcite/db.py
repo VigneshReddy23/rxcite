@@ -83,6 +83,22 @@ def count_chunks(conn: psycopg.Connection[tuple[object, ...]]) -> int:
     return cast(int, row[0]) if row else 0
 
 
+def all_chunks(
+    conn: psycopg.Connection[tuple[object, ...]],
+) -> list[tuple[Chunk, list[float]]]:
+    """Every chunk with its stored embedding (for export to another database)."""
+    rows = conn.execute(f"SELECT {COLUMNS}, embedding FROM chunks ORDER BY id").fetchall()
+    return [
+        (
+            Chunk(
+                id=str(r[0]), set_id=str(r[1]), drug=str(r[2]), section=str(r[3]), text=str(r[4])
+            ),
+            [float(x) for x in r[5].to_list()],  # type: ignore[attr-defined]
+        )
+        for r in rows
+    ]
+
+
 def _hits(rows: list[tuple[object, ...]]) -> list[Hit]:
     return [
         Hit(
